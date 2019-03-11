@@ -121,11 +121,11 @@ public class MainActivity extends AppCompatActivity {
     Socket mSocket = null;
     DataOutputStream mOS = null;
     int mWidth = 0;
-    int mHeight= 0;
+    int mHeight = 0;
     String TAG = "MyApp";
     AvcEncoder mEncoder = null;
 
-    private void AppInfo(){
+    private void AppInfo() {
         Log.i(TAG, "BOARD = " + Build.BOARD);
         Log.i(TAG, "BRAND = " + Build.BRAND);
         Log.i(TAG, "CPU_ABI = " + Build.CPU_ABI);
@@ -162,7 +162,7 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
-        if( mPreview == null) {
+        if (mPreview == null) {
             mPreview = findViewById(R.id.surface);
             //mPreview.getHolder().setFixedSize(740, 360);
             mHolder = mPreview.getHolder();
@@ -195,10 +195,10 @@ public class MainActivity extends AppCompatActivity {
                     parameters.setPreviewFrameRate(30);
                     try {
                         mCamera.setPreviewDisplay(mHolder);
-                        Display display = ((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
+                        Display display = ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay();
                         mWidth = parameters.getPreviewSize().width;
                         mHeight = parameters.getPreviewSize().height;
-                        if( !Build.PRODUCT.equals("sdk_gphone_x86")) {
+                        if (!Build.PRODUCT.equals("sdk_gphone_x86")) {
                             mWidth = 640;
                             mHeight = 360;
                         }
@@ -216,26 +216,24 @@ public class MainActivity extends AppCompatActivity {
                         public synchronized void onPreviewFrame(byte[] data, Camera camera) {
                             Log.v("CameraTest", "Time Gap = " + (System.currentTimeMillis() - timestamp) + " : size = " + String.valueOf(data.length));
                             timestamp = System.currentTimeMillis();
-                            try {
-                                //Thread sendThread = new Thread(sendMsg);
-                                //encode(data);
-                                Thread sendThread = new Thread(new sendMessage(mOS, data));
-                                sendThread.start();
-                                //camera.addCallbackBuffer(data);
-                            } catch (Exception e) {
-                                Log.e("CameraTest", "addCallbackBuffer error :" + e.getMessage());
-                                return;
-                            }
-                            return;
+                            //Thread sendThread = new Thread(sendMsg);
+                            //encode(data);
+                            //Thread sendThread = new Thread(new sendMessage(mOS, data));
+                            //sendThread.start();
+                            byte[] Data = YV12toYUV420PackedSemiPlanar(data, mWidth, mHeight);
+                            //mEncoder.offerEncoder(Data);
+                            mEncoder.putData(Data);
+                            Log.v("CameraTest", "Time Gap = " + (System.currentTimeMillis() - timestamp) + " : size = " + String.valueOf(Data.length));
+
                         }
                     });
                     //initCodec();
                     mCamera.startPreview();
                     //mCamera.unlock();
                 } else {
-                    mCamera.autoFocus (new Camera.AutoFocusCallback() {
+                    mCamera.autoFocus(new Camera.AutoFocusCallback() {
                         public void onAutoFocus(boolean success, Camera camera) {
-                            if(success){
+                            if (success) {
                                 Log.d("Camera", "autoFocus Success");
                             }
                             Log.d("Camera", "autoFocus");
@@ -257,7 +255,7 @@ public class MainActivity extends AppCompatActivity {
                     mCamera.release();
                     mCamera = null;
                 }
-                if( mEncoder != null){
+                if (mEncoder != null) {
                     mEncoder.close();
                     mEncoder = null;
                 }
@@ -310,7 +308,7 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             Log.d("conSocket", "in");
             try {
-                if(mSocket != null){
+                if (mSocket != null) {
                     mSocket.close();
                     mSocket = null;
                 }
@@ -332,7 +330,7 @@ public class MainActivity extends AppCompatActivity {
         DataOutputStream mDos;
 
         sendMessage(DataOutputStream dos, byte[] data) {
-            mDos= dos;
+            mDos = dos;
             //mData = data;
             mData = YV12toYUV420PackedSemiPlanar(data, mWidth, mHeight);
             //mData = YV12toYUV420Planar(data, mWidth, mHeight);
@@ -359,14 +357,15 @@ public class MainActivity extends AppCompatActivity {
 
     public byte[] swapYV12toI420(byte[] yv12bytes, int width, int height) {
         byte[] i420bytes = new byte[yv12bytes.length];
-        for (int i = 0; i < width*height; i++)
+        for (int i = 0; i < width * height; i++)
             i420bytes[i] = yv12bytes[i];
-        for (int i = width*height; i < width*height + (width/2*height/2); i++)
-            i420bytes[i] = yv12bytes[i + (width/2*height/2)];
-        for (int i = width*height + (width/2*height/2); i < width*height + 2*(width/2*height/2); i++)
-            i420bytes[i] = yv12bytes[i - (width/2*height/2)];
+        for (int i = width * height; i < width * height + (width / 2 * height / 2); i++)
+            i420bytes[i] = yv12bytes[i + (width / 2 * height / 2)];
+        for (int i = width * height + (width / 2 * height / 2); i < width * height + 2 * (width / 2 * height / 2); i++)
+            i420bytes[i] = yv12bytes[i - (width / 2 * height / 2)];
         return i420bytes;
     }
+
     public static byte[] YV12toYUV420PackedSemiPlanar(final byte[] input, final int width, final int height) {
         /*
          * COLOR_TI_FormatYUV420PackedSemiPlanar is NV12
@@ -374,16 +373,17 @@ public class MainActivity extends AppCompatActivity {
          */
         byte[] output = new byte[input.length];
         final int frameSize = width * height;
-        final int qFrameSize = frameSize/4;
+        final int qFrameSize = frameSize / 4;
 
         System.arraycopy(input, 0, output, 0, frameSize); // Y
 
         for (int i = 0; i < qFrameSize; i++) {
-            output[frameSize + i*2] = input[frameSize + i + qFrameSize]; // Cb (U)
-            output[frameSize + i*2 + 1] = input[frameSize + i]; // Cr (V)
+            output[frameSize + i * 2] = input[frameSize + i + qFrameSize]; // Cb (U)
+            output[frameSize + i * 2 + 1] = input[frameSize + i]; // Cr (V)
         }
         return output;
     }
+
     public static byte[] YV12toYUV420Planar(byte[] input, int width, int height) {
         /*
          * COLOR_FormatYUV420Planar is I420 which is like YV12, but with U and V reversed.
@@ -391,7 +391,7 @@ public class MainActivity extends AppCompatActivity {
          */
         byte[] output = new byte[input.length];
         final int frameSize = width * height;
-        final int qFrameSize = frameSize/4;
+        final int qFrameSize = frameSize / 4;
 
         System.arraycopy(input, 0, output, 0, frameSize); // Y
         System.arraycopy(input, frameSize, output, frameSize + qFrameSize, qFrameSize); // Cr (V)
@@ -406,11 +406,16 @@ public class MainActivity extends AppCompatActivity {
         private BufferedOutputStream outputStream;
         private int mWidth, mHeight;
         private Socket mSocket;
+        private boolean isDoEncoding;
+        private boolean isClose;
+        ByteBuffer[] inputBuffers;
 
-        public AvcEncoder(Socket socket, int width, int height ) {
+        public AvcEncoder(Socket socket, int width, int height) {
             mWidth = width;
             mHeight = height;
             mSocket = socket;
+            isDoEncoding = false;
+            isClose = false;
             File f = new File(Environment.getExternalStorageDirectory(), "video_encoded.264.mp4");
             //touch(f);
             Log.d("AvcEncoder", "in");
@@ -427,21 +432,29 @@ public class MainActivity extends AppCompatActivity {
             try {
                 mediaCodec = MediaCodec.createEncoderByType("video/avc");
                 MediaFormat mediaFormat = MediaFormat.createVideoFormat("video/avc", mWidth, mHeight);
-                mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 800000);
+                mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 4000000);
                 mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 25);
                 //mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar);
                 mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar);
-                mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+                mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 25);
                 mediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                 mediaCodec.start();
-            } catch( IOException e ){
+            } catch (IOException e) {
                 e.printStackTrace();
             }
+            Thread doEncodeThread = new Thread(doEncode);
+            doEncodeThread.start();
+            inputBuffers = mediaCodec.getInputBuffers();
             Log.d("AvcEncoder", "out");
         }
 
         public void close() {
             try {
+                isClose = true;
+                while (!isDoEncoding) {
+                    Thread.sleep(100);
+                    Log.d("Encoder", "Wait Stop");
+                }
                 mediaCodec.stop();
                 mediaCodec.release();
                 outputStream.flush();
@@ -451,6 +464,78 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }
+
+        public void putData(byte[] input) {
+            try {
+                //ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
+                int inputBufferIndex = mediaCodec.dequeueInputBuffer(1000);
+                if (inputBufferIndex >= 0) {
+                    ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+                    //inputBuffer.clear();
+                    inputBuffer.put(input);
+                    mediaCodec.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
+                }
+
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+
+        }
+
+        public Runnable doEncode = new Runnable() {
+            public void run() {
+                try {
+                    isDoEncoding = true;
+                    ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
+                    MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+                    int outputBufferIndex = -1;
+                    //byte[] outData = new byte[100000];
+                    while (!isClose) {
+                        do {
+                            outputBufferIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, 1000);
+                            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                                //Log.e("enc: out", "INFO_TRY_AGAIN_LATER: " );
+                                    break;
+                            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                                MediaFormat format = mediaCodec.getOutputFormat();
+                                Log.e("enc: out: ", " INFO_OUTPUT_FORMAT_CHANGED: " + format.toString());
+                            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                                outputBuffers = mediaCodec.getOutputBuffers();
+                                Log.e("enc: out:", " INFO_OUTPUT_BUFFERS_CHANGED");
+                            } else {
+                                ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
+                                byte[] outData = new byte[bufferInfo.size];
+                                outputBuffer.get(outData);
+                                outputStream.write(outData, 0, outData.length);
+                                //outputStream.write(outData, 0, bufferInfo.size);
+                                Log.i("AvcEncoder", bufferInfo.size + " bytes written : INDX :" + String.valueOf(outputBufferIndex));
+
+                                mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
+                                if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                    Log.e("enc: out:", " EOS");
+                                    break;
+                                }
+                            }
+                            /*
+                            if (outputBufferIndex >= 0) {
+                                ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
+                                byte[] outData = new byte[bufferInfo.size];
+                                outputBuffer.get(outData);
+                                outputStream.write(outData, 0, outData.length);
+                                Log.i("AvcEncoder", outData.length + " bytes written");
+
+                                mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
+                            }
+                            */
+                        } while (outputBufferIndex >= 0);
+                        //Thread.sleep(100);
+                    }
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+                isDoEncoding = false;
+            }
+        };
 
         public void offerEncoder(byte[] input) {
             try {
