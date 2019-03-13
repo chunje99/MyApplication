@@ -124,7 +124,7 @@ public class MainActivity extends AppCompatActivity {
     int mHeight = 0;
     String TAG = "MyApp";
     AvcEncoder mEncoder = null;
-
+    BufferedOutputStream mOutputStream = null;
     private void AppInfo() {
         Log.i(TAG, "BOARD = " + Build.BOARD);
         Log.i(TAG, "BRAND = " + Build.BRAND);
@@ -204,18 +204,28 @@ public class MainActivity extends AppCompatActivity {
                         }
                         int tmp = mWidth;
                         mCamera.setDisplayOrientation(0);
+                        if(Build.MANUFACTURER.equals("LGE") && Build.MODEL.equals("Nexus 5X"))
+                            mCamera.setDisplayOrientation(180);
                         parameters.setPreviewSize(mWidth, mHeight);
                     } catch (IOException e) {
                         Log.e("Camera", e.getMessage());
                     }
-                    mEncoder = new AvcEncoder(mSocket, mWidth, mHeight);
+                    mEncoder = new AvcEncoder(mOutputStream, mWidth, mHeight);
                     mCamera.setParameters(parameters);
                     mCamera.setPreviewCallback(new Camera.PreviewCallback() {
                         private long timestamp = 0;
+                        private long resetTime = System.currentTimeMillis();
 
                         public synchronized void onPreviewFrame(byte[] data, Camera camera) {
                             Log.v("CameraTest", "Time Gap = " + (System.currentTimeMillis() - timestamp) + " : size = " + String.valueOf(data.length));
                             timestamp = System.currentTimeMillis();
+                            if( timestamp - resetTime > 1000) {
+                                resetTime = timestamp;
+                                mEncoder.close();
+                                mEncoder = new AvcEncoder(mOutputStream, mWidth, mHeight);
+                                //mEncoder.flush();
+                                Log.e("CameraTest", "reset");
+                            }
                             //Thread sendThread = new Thread(sendMsg);
                             //encode(data);
                             //Thread sendThread = new Thread(new sendMessage(mOS, data));
@@ -315,7 +325,8 @@ public class MainActivity extends AppCompatActivity {
                 mSocket = new Socket("192.168.0.16", 8888);
 
                 //mFileDescriptor = ParcelFileDescriptor.fromSocket(mSocket);
-                mOS = new DataOutputStream(mSocket.getOutputStream());
+                //mOS = new DataOutputStream(mSocket.getOutputStream());
+                mOutputStream = new BufferedOutputStream(mSocket.getOutputStream());
                 Log.d("start", "Connection Socket");
                 //mSocket.close();
             } catch (IOException e) {
@@ -403,24 +414,25 @@ public class MainActivity extends AppCompatActivity {
     public class AvcEncoder {
 
         private MediaCodec mediaCodec;
-        private BufferedOutputStream outputStream;
+        private BufferedOutputStream mOutputStream;
         private int mWidth, mHeight;
         private Socket mSocket;
         private boolean isDoEncoding;
         private boolean isClose;
         ByteBuffer[] inputBuffers;
 
-        public AvcEncoder(Socket socket, int width, int height) {
+        public AvcEncoder(BufferedOutputStream outputStream, int width, int height) {
             mWidth = width;
             mHeight = height;
-            mSocket = socket;
+            //mSocket = socket;
             isDoEncoding = false;
             isClose = false;
-            File f = new File(Environment.getExternalStorageDirectory(), "video_encoded.264.mp4");
+            //File f = new File(Environment.getExternalStorageDirectory(), "video_encoded.264.mp4");
             //touch(f);
             Log.d("AvcEncoder", "in");
             try {
-                outputStream = new BufferedOutputStream(mSocket.getOutputStream());
+                mOutputStream = outputStream;
+                //outputStream = new BufferedOutputStream(mSocket.getOutputStream());
                 //outputStream = new BufferedOutputStream(new FileOutputStream(f));
                 Log.i("AvcEncoder", "outputStream initialized");
             } catch (Exception e) {
@@ -432,11 +444,16 @@ public class MainActivity extends AppCompatActivity {
             try {
                 mediaCodec = MediaCodec.createEncoderByType("video/avc");
                 MediaFormat mediaFormat = MediaFormat.createVideoFormat("video/avc", mWidth, mHeight);
-                mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 4000000);
-                mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 25);
+                if(Build.MANUFACTURER.equals("LGE") && Build.MODEL.equals("Nexus 5X")){
+                    mediaFormat.setInteger(MediaFormat.KEY_ROTATION, 0);
+                    Log.e("AvcEncoder", "Rotate");
+                }
+                mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 2000000);
+                mediaFormat.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
+                mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
                 //mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar);
                 mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar);
-                mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 25);
+                mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 15);
                 mediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                 mediaCodec.start();
             } catch (IOException e) {
@@ -448,6 +465,9 @@ public class MainActivity extends AppCompatActivity {
             Log.d("AvcEncoder", "out");
         }
 
+        public void flush() {
+            mediaCodec.flush();
+        }
         public void close() {
             try {
                 isClose = true;
@@ -457,34 +477,42 @@ public class MainActivity extends AppCompatActivity {
                 }
                 mediaCodec.stop();
                 mediaCodec.release();
-                outputStream.flush();
-                outputStream.close();
-                mSocket.close();
+                mOutputStream.flush();
+                //outputStream.close();
+                //mSocket.close();
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        public void putData(byte[] input) {
-            try {
-                //ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
-                int inputBufferIndex = mediaCodec.dequeueInputBuffer(1000);
-                if (inputBufferIndex >= 0) {
-                    ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-                    //inputBuffer.clear();
-                    inputBuffer.put(input);
-                    mediaCodec.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
+        public void putData(final byte[] input) {
+            Thread putThread2 = new Thread(){
+                public void run() {
+                    try {
+                        int inputBufferIndex = mediaCodec.dequeueInputBuffer(-1);
+                        if (inputBufferIndex >= 0) {
+                            //ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+                            //inputBuffer.clear();
+                            //inputBuffer.put(input);
+                            mediaCodec.getInputBuffer(inputBufferIndex).put(input);
+                            mediaCodec.queueInputBuffer(inputBufferIndex, 0, input.length, System.currentTimeMillis(), 0);
+                            //mediaCodec.flush();
+                        } else {
+                            Log.e("putData", "inputBufferError");
+                        }
+
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
                 }
-
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-
-        }
+            };
+            putThread2.start();
+        };
 
         public Runnable doEncode = new Runnable() {
             public void run() {
                 try {
+                    int timeUs = 100000;
                     isDoEncoding = true;
                     ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
                     MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
@@ -492,7 +520,7 @@ public class MainActivity extends AppCompatActivity {
                     //byte[] outData = new byte[100000];
                     while (!isClose) {
                         do {
-                            outputBufferIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, 1000);
+                            outputBufferIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeUs);
                             if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
                                 //Log.e("enc: out", "INFO_TRY_AGAIN_LATER: " );
                                     break;
@@ -503,13 +531,16 @@ public class MainActivity extends AppCompatActivity {
                                 outputBuffers = mediaCodec.getOutputBuffers();
                                 Log.e("enc: out:", " INFO_OUTPUT_BUFFERS_CHANGED");
                             } else {
-                                ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
-                                byte[] outData = new byte[bufferInfo.size];
+                                //ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
+                                ByteBuffer outputBuffer = mediaCodec.getOutputBuffer(outputBufferIndex);
+                                outputBuffer.position(bufferInfo.offset);
+                                outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
+                                byte[] outData = new byte[outputBuffer.remaining()];
                                 outputBuffer.get(outData);
-                                outputStream.write(outData, 0, outData.length);
+                                mOutputStream.write(outData, 0, outData.length);
                                 //outputStream.write(outData, 0, bufferInfo.size);
                                 Log.i("AvcEncoder", bufferInfo.size + " bytes written : INDX :" + String.valueOf(outputBufferIndex));
-
+                                outputBuffer.clear();
                                 mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
                                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                                     Log.e("enc: out:", " EOS");
@@ -555,7 +586,7 @@ public class MainActivity extends AppCompatActivity {
                     ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
                     byte[] outData = new byte[bufferInfo.size];
                     outputBuffer.get(outData);
-                    outputStream.write(outData, 0, outData.length);
+                    mOutputStream.write(outData, 0, outData.length);
                     Log.i("AvcEncoder", outData.length + " bytes written");
 
                     mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
