@@ -125,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
     String TAG = "MyApp";
     AvcEncoder mEncoder = null;
     BufferedOutputStream mOutputStream = null;
+    ParcelFileDescriptor mFileDescriptor = null;
     private void AppInfo() {
         Log.i(TAG, "BOARD = " + Build.BOARD);
         Log.i(TAG, "BRAND = " + Build.BRAND);
@@ -212,6 +213,8 @@ public class MainActivity extends AppCompatActivity {
                     }
                     mEncoder = new AvcEncoder(mOutputStream, mWidth, mHeight);
                     mCamera.setParameters(parameters);
+                    mCamera.setPreviewCallback(mCameraCallback);
+                    /*
                     mCamera.setPreviewCallback(new Camera.PreviewCallback() {
                         private long timestamp = 0;
                         private long resetTime = System.currentTimeMillis();
@@ -221,22 +224,13 @@ public class MainActivity extends AppCompatActivity {
                             timestamp = System.currentTimeMillis();
                             if( timestamp - resetTime > 1000) {
                                 resetTime = timestamp;
-                                mEncoder.close();
-                                mEncoder = new AvcEncoder(mOutputStream, mWidth, mHeight);
-                                //mEncoder.flush();
                                 Log.e("CameraTest", "reset");
                             }
-                            //Thread sendThread = new Thread(sendMsg);
-                            //encode(data);
-                            //Thread sendThread = new Thread(new sendMessage(mOS, data));
-                            //sendThread.start();
-                            byte[] Data = YV12toYUV420PackedSemiPlanar(data, mWidth, mHeight);
-                            //mEncoder.offerEncoder(Data);
-                            mEncoder.putData(Data);
-                            Log.v("CameraTest", "Time Gap = " + (System.currentTimeMillis() - timestamp) + " : size = " + String.valueOf(Data.length));
+                            mEncoder.putData(data);
 
                         }
                     });
+                    */
                     //initCodec();
                     mCamera.startPreview();
                     //mCamera.unlock();
@@ -258,25 +252,32 @@ public class MainActivity extends AppCompatActivity {
         fab2.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if (mCamera != null) {
-                    Log.i("Media", "stop camera");
-                    mCamera.stopPreview();
-                    mCamera.setPreviewCallback(null);
-                    mCamera.release();
-                    mCamera = null;
-                }
-                if (mEncoder != null) {
-                    mEncoder.close();
-                    mEncoder = null;
-                }
-                //Thread stopThread = new Thread(stopRecorde);
-                //Log.i("Media", "stop Thread Created");
-                //stopThread.start();
+                Thread stopThread = new Thread(stopRecord);
+                Log.i("Media", "stop Thread Created");
+                stopThread.start();
                 Log.d("fab2", "stop");
 
             }
         });
     }
+    public Runnable stopRecord = new Runnable() {
+        public void run(){
+            if (mCamera != null) {
+                Log.i("Media", "stop camera");
+                mCamera.stopPreview();
+                mCamera.setPreviewCallback(null);
+                mCamera.release();
+                mCamera = null;
+            }
+            if (mEncoder != null) {
+                mEncoder.close();
+                mEncoder = null;
+            }
+            //Thread stopThread = new Thread(stopRecorde);
+            //Log.i("Media", "stop Thread Created");
+            //stopThread.start();
+        }
+    };
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -324,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 mSocket = new Socket("192.168.0.16", 8888);
 
-                //mFileDescriptor = ParcelFileDescriptor.fromSocket(mSocket);
+                mFileDescriptor = ParcelFileDescriptor.fromSocket(mSocket);
                 //mOS = new DataOutputStream(mSocket.getOutputStream());
                 mOutputStream = new BufferedOutputStream(mSocket.getOutputStream());
                 Log.d("start", "Connection Socket");
@@ -410,6 +411,11 @@ public class MainActivity extends AppCompatActivity {
 
         return output;
     }
+    public Camera.PreviewCallback mCameraCallback = new Camera.PreviewCallback() {
+        public synchronized void onPreviewFrame(byte[] data, Camera camera) {
+            mEncoder.putData(data);
+        }
+    };
 
     public class AvcEncoder {
 
@@ -419,7 +425,10 @@ public class MainActivity extends AppCompatActivity {
         private Socket mSocket;
         private boolean isDoEncoding;
         private boolean isClose;
-        ByteBuffer[] inputBuffers;
+        //ByteBuffer[] inputBuffers;
+        private MediaMuxer mMuxer = null;
+        private String outputPath;
+        private int mTrackIndex;
 
         public AvcEncoder(BufferedOutputStream outputStream, int width, int height) {
             mWidth = width;
@@ -427,6 +436,7 @@ public class MainActivity extends AppCompatActivity {
             //mSocket = socket;
             isDoEncoding = false;
             isClose = false;
+            outputPath = Environment.getExternalStorageDirectory() +"/video_encoded.264.mp4";
             //File f = new File(Environment.getExternalStorageDirectory(), "video_encoded.264.mp4");
             //touch(f);
             Log.d("AvcEncoder", "in");
@@ -442,6 +452,8 @@ public class MainActivity extends AppCompatActivity {
             Log.d("AvcEncoder", "ConOK");
 
             try {
+                mMuxer = new MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                //mMuxer = new MediaMuxer(mFileDescriptor.getFileDescriptor(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 mediaCodec = MediaCodec.createEncoderByType("video/avc");
                 MediaFormat mediaFormat = MediaFormat.createVideoFormat("video/avc", mWidth, mHeight);
                 if(Build.MANUFACTURER.equals("LGE") && Build.MODEL.equals("Nexus 5X")){
@@ -461,7 +473,7 @@ public class MainActivity extends AppCompatActivity {
             }
             Thread doEncodeThread = new Thread(doEncode);
             doEncodeThread.start();
-            inputBuffers = mediaCodec.getInputBuffers();
+            //inputBuffers = mediaCodec.getInputBuffers();
             Log.d("AvcEncoder", "out");
         }
 
@@ -480,6 +492,11 @@ public class MainActivity extends AppCompatActivity {
                 mOutputStream.flush();
                 //outputStream.close();
                 //mSocket.close();
+                if (mMuxer != null) {
+                    mMuxer.stop();
+                    mMuxer.release();
+                    mMuxer = null;
+                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -489,13 +506,14 @@ public class MainActivity extends AppCompatActivity {
             Thread putThread2 = new Thread(){
                 public void run() {
                     try {
+                        byte[] Data = YV12toYUV420PackedSemiPlanar(input, mWidth, mHeight);
                         int inputBufferIndex = mediaCodec.dequeueInputBuffer(-1);
                         if (inputBufferIndex >= 0) {
                             //ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                             //inputBuffer.clear();
                             //inputBuffer.put(input);
-                            mediaCodec.getInputBuffer(inputBufferIndex).put(input);
-                            mediaCodec.queueInputBuffer(inputBufferIndex, 0, input.length, System.currentTimeMillis(), 0);
+                            mediaCodec.getInputBuffer(inputBufferIndex).put(Data);
+                            mediaCodec.queueInputBuffer(inputBufferIndex, 0, Data.length, prevOutputPTSUs, 0);
                             //mediaCodec.flush();
                         } else {
                             Log.e("putData", "inputBufferError");
@@ -525,8 +543,12 @@ public class MainActivity extends AppCompatActivity {
                                 //Log.e("enc: out", "INFO_TRY_AGAIN_LATER: " );
                                     break;
                             } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                                MediaFormat format = mediaCodec.getOutputFormat();
-                                Log.e("enc: out: ", " INFO_OUTPUT_FORMAT_CHANGED: " + format.toString());
+                                MediaFormat newFormat = mediaCodec.getOutputFormat();
+                                Log.d(TAG, "encoder output format changed: " + newFormat);
+                                // now that we have the Magic Goodies, start the muxer
+                                mTrackIndex = mMuxer.addTrack(newFormat);
+                                mMuxer.start();
+                                Log.e("enc: out: ", " INFO_OUTPUT_FORMAT_CHANGED: " + newFormat.toString());
                             } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                                 outputBuffers = mediaCodec.getOutputBuffers();
                                 Log.e("enc: out:", " INFO_OUTPUT_BUFFERS_CHANGED");
@@ -535,12 +557,15 @@ public class MainActivity extends AppCompatActivity {
                                 ByteBuffer outputBuffer = mediaCodec.getOutputBuffer(outputBufferIndex);
                                 outputBuffer.position(bufferInfo.offset);
                                 outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
-                                byte[] outData = new byte[outputBuffer.remaining()];
-                                outputBuffer.get(outData);
-                                mOutputStream.write(outData, 0, outData.length);
+                                bufferInfo.presentationTimeUs = getPTSUs();
+                                //byte[] outData = new byte[outputBuffer.remaining()];
+                                //outputBuffer.get(outData);
+                                //mOutputStream.write(outData, 0, outData.length);
+                                mMuxer.writeSampleData(mTrackIndex, outputBuffer, bufferInfo);
                                 //outputStream.write(outData, 0, bufferInfo.size);
                                 Log.i("AvcEncoder", bufferInfo.size + " bytes written : INDX :" + String.valueOf(outputBufferIndex));
-                                outputBuffer.clear();
+                                //outputBuffer.clear();
+                                prevOutputPTSUs = bufferInfo.presentationTimeUs;
                                 mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
                                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                                     Log.e("enc: out:", " EOS");
@@ -597,6 +622,22 @@ public class MainActivity extends AppCompatActivity {
                 t.printStackTrace();
             }
 
+        }
+        /**
+         * previous presentationTimeUs for writing
+         */
+        private long prevOutputPTSUs = 0;
+        /**
+         * get next encoding presentationTimeUs
+         * @return
+         */
+        protected long getPTSUs() {
+            long result = System.nanoTime() / 1000L;
+            // presentationTimeUs should be monotonic
+            // otherwise muxer fail to write
+            if (result < prevOutputPTSUs)
+                result = (prevOutputPTSUs - result) + result;
+            return result;
         }
     }
 }
