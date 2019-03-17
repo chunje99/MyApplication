@@ -6,6 +6,8 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.hardware.Camera;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
@@ -45,6 +47,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Base64;
+
+import static android.support.v4.util.Preconditions.checkNotNull;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -124,8 +129,10 @@ public class MainActivity extends AppCompatActivity {
     int mHeight = 0;
     String TAG = "MyApp";
     AvcEncoder mEncoder = null;
+    AudioEncoder mAudioEncoder = null;
     BufferedOutputStream mOutputStream = null;
     ParcelFileDescriptor mFileDescriptor = null;
+
     private void AppInfo() {
         Log.i(TAG, "BOARD = " + Build.BOARD);
         Log.i(TAG, "BRAND = " + Build.BRAND);
@@ -182,10 +189,7 @@ public class MainActivity extends AppCompatActivity {
                 if (mCamera == null) {
                     Thread conThread = new Thread(conSocket);
                     conThread.start();
-
                     mPreview.setVisibility(View.VISIBLE);
-                    //Thread conThread = new Thread(null, conSocket, "conSocket");
-                    //conThread.start();
                     mCamera = Camera.open(0);
                     Camera.Parameters parameters = mCamera.getParameters();
                     Log.d("PreviewFormat :", String.valueOf(parameters.getPreviewFormat()));
@@ -212,6 +216,8 @@ public class MainActivity extends AppCompatActivity {
                         Log.e("Camera", e.getMessage());
                     }
                     mEncoder = new AvcEncoder(mOutputStream, mWidth, mHeight);
+                    mAudioEncoder = new AudioEncoder();
+                    mAudioEncoder.encodeAudio();
                     mCamera.setParameters(parameters);
                     mCamera.setPreviewCallback(mCameraCallback);
                     /*
@@ -273,6 +279,10 @@ public class MainActivity extends AppCompatActivity {
                 mEncoder.close();
                 mEncoder = null;
             }
+            if (mAudioEncoder!= null) {
+                mAudioEncoder.release();
+                mAudioEncoder = null;
+            }
             //Thread stopThread = new Thread(stopRecorde);
             //Log.i("Media", "stop Thread Created");
             //stopThread.start();
@@ -311,6 +321,10 @@ public class MainActivity extends AppCompatActivity {
             mCamera.setPreviewCallback(null);
             mCamera.release();
             mCamera = null;
+        }
+        if (mAudioEncoder!= null) {
+            mAudioEncoder.release();
+            mAudioEncoder = null;
         }
         Log.e("Main", "onDestroy out");
     }
@@ -352,7 +366,8 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             Log.d("sendMsg", "in");
             //encode(mData);
-            mEncoder.offerEncoder(mData);
+            if( mEncoder != null)
+                mEncoder.offerEncoder(mData);
             /*
             try {
                 mDos.write(mData);
@@ -413,7 +428,8 @@ public class MainActivity extends AppCompatActivity {
     }
     public Camera.PreviewCallback mCameraCallback = new Camera.PreviewCallback() {
         public synchronized void onPreviewFrame(byte[] data, Camera camera) {
-            mEncoder.putData(data);
+            if( mEncoder != null)
+                mEncoder.putData(data);
         }
     };
 
@@ -473,7 +489,6 @@ public class MainActivity extends AppCompatActivity {
             }
             Thread doEncodeThread = new Thread(doEncode);
             doEncodeThread.start();
-            //inputBuffers = mediaCodec.getInputBuffers();
             Log.d("AvcEncoder", "out");
         }
 
@@ -558,9 +573,9 @@ public class MainActivity extends AppCompatActivity {
                                 outputBuffer.position(bufferInfo.offset);
                                 outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
                                 bufferInfo.presentationTimeUs = getPTSUs();
-                                //byte[] outData = new byte[outputBuffer.remaining()];
-                                //outputBuffer.get(outData);
-                                //mOutputStream.write(outData, 0, outData.length);
+                                byte[] outData = new byte[outputBuffer.remaining()];
+                                outputBuffer.get(outData);
+                                mOutputStream.write(outData, 0, outData.length);
                                 mMuxer.writeSampleData(mTrackIndex, outputBuffer, bufferInfo);
                                 //outputStream.write(outData, 0, bufferInfo.size);
                                 Log.i("AvcEncoder", bufferInfo.size + " bytes written : INDX :" + String.valueOf(outputBufferIndex));
@@ -640,5 +655,6 @@ public class MainActivity extends AppCompatActivity {
             return result;
         }
     }
+
 }
 
